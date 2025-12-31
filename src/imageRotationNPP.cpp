@@ -33,7 +33,7 @@
 #endif
 
 #include <Exceptions.h>
-#include <ImageIO.h>
+// #include <ImageIO.h>
 #include <ImagesCPU.h>
 #include <ImagesNPP.h>
 
@@ -46,6 +46,12 @@
 
 #include <helper_cuda.h>
 #include <helper_string.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
 
 bool printfNPPinfo(int argc, char *argv[])
 {
@@ -90,7 +96,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            filePath = sdkFindFilePath("Lena.pgm", argv[0]);
+            filePath = sdkFindFilePath("../data/Lena.png", argv[0]);
         }
 
         if (filePath)
@@ -99,7 +105,7 @@ int main(int argc, char *argv[])
         }
         else
         {
-            sFilename = "Lena.pgm";
+            sFilename = "../data/Lena.png";
         }
 
         // if we specify the filename at the command line, then we only test
@@ -136,7 +142,7 @@ int main(int argc, char *argv[])
             sResultFilename = sResultFilename.substr(0, dot);
         }
 
-        sResultFilename += "_rotate.pgm";
+        sResultFilename += "_rotate.png";
 
         if (checkCmdLineFlag(argc, (const char **)argv, "output"))
         {
@@ -146,23 +152,51 @@ int main(int argc, char *argv[])
             sResultFilename = outputFilePath;
         }
 
-        // declare a host image object for an 8-bit grayscale image
-        npp::ImageCPU_8u_C1 oHostSrc;
-        // load gray-scale image from disk
-        npp::loadImage(sFilename, oHostSrc);
-        // declare a device image and copy construct from the host image,
-        // i.e. upload host to device
+        // 1. Load dimensions and pixel data using STB
+        int width, height, channels;
+        unsigned char *pData = stbi_load(sFilename.c_str(), &width, &height, &channels, 1);
+
+        if (pData == nullptr)
+        {
+            std::cerr << "Failed to load image: " << sFilename << std::endl;
+            exit(EXIT_FAILURE);
+        }
+
+        // 2. Setup NPP Host Image and metadata
+        // Initialize host image directly with dimensions
+        // 1. Create a clean NPP Host Image object (this allocates its own memory)
+        npp::ImageCPU_8u_C1 oHostSrc(width, height);
+
+        // 2. Perform a row-by-row copy to account for NPP memory alignment (pitch)
+        for (int y = 0; y < height; ++y)
+        {
+            unsigned char *pLineData = oHostSrc.data() + (y * oHostSrc.pitch());
+            unsigned char *pLineSrc = pData + (y * width);
+            memcpy(pLineData, pLineSrc, width);
+        }
+
+        // 3. Immediately free the STB buffer now that data is safely in oHostSrc
+        stbi_image_free(pData);
+        
+        NppiSize oSrcSize = {width, height};
+        NppiRect oSrcRect = {0, 0, width, height};
+
+        // 3. Upload to Device
         npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
 
-        // create struct with the ROI size
-        NppiSize oSrcSize = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
-        NppiPoint oSrcOffset = {0, 0};
+       // create struct with the ROI size
         NppiSize oSizeROI = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
 
         // Calculate the bounding box of the rotated image
         NppiRect oBoundingBox;
         double angle = 45.0; // Rotation angle in degrees
-        NPP_CHECK_NPP(nppiGetRotateBound(oSrcSize, angle, &oBoundingBox));
+        double aBoundingBox[2][2]; // Array to store the result coordinates
+        NPP_CHECK_NPP(nppiGetRotateBound(oSrcRect, aBoundingBox, angle, 0.0, 0.0));
+
+        oBoundingBox.x = (int)aBoundingBox[0][0];
+        oBoundingBox.y = (int)aBoundingBox[0][1];
+        oBoundingBox.width = (int)(aBoundingBox[1][0] - aBoundingBox[0][0]);
+        oBoundingBox.height = (int)(aBoundingBox[1][1] - aBoundingBox[0][1]);
 
         // allocate device image for the rotated image
         npp::ImageNPP_8u_C1 oDeviceDst(oBoundingBox.width, oBoundingBox.height);
@@ -170,22 +204,22 @@ int main(int argc, char *argv[])
         // Set the rotation point (center of the image)
         NppiPoint oRotationCenter = {(int)(oSrcSize.width / 2), (int)(oSrcSize.height / 2)};
 
-        // run the rotation
+        // Ensure the destination ROI is anchored at 0,0 for the rotation call
+        NppiRect oDstRect = {0, 0, oBoundingBox.width, oBoundingBox.height};
+
+        // Update the shifts to -oBoundingBox.x and -oBoundingBox.y
         NPP_CHECK_NPP(nppiRotate_8u_C1R(
-            oDeviceSrc.data(), oSrcSize, oDeviceSrc.pitch(), oSrcOffset,
-            oDeviceDst.data(), oDeviceDst.pitch(), oBoundingBox, angle, oRotationCenter,
-            NPPI_INTER_NN));
+            oDeviceSrc.data(), oSrcSize, oDeviceSrc.pitch(), oSrcRect,
+            oDeviceDst.data(), oDeviceDst.pitch(), oDstRect,
+            angle, -(double)oBoundingBox.x, -(double)oBoundingBox.y, NPPI_INTER_NN));
 
         // declare a host image for the result
         npp::ImageCPU_8u_C1 oHostDst(oDeviceDst.size());
         // and copy the device result data into it
         oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
 
-        saveImage(sResultFilename, oHostDst);
+        stbi_write_png(sResultFilename.c_str(), oHostDst.width(), oHostDst.height(), 1, oHostDst.data(), oHostDst.width());
         std::cout << "Saved image: " << sResultFilename << std::endl;
-
-        nppiFree(oDeviceSrc.data());
-        nppiFree(oDeviceDst.data());
 
         exit(EXIT_SUCCESS);
     }

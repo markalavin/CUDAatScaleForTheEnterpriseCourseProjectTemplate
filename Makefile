@@ -34,7 +34,10 @@
 # Define the compiler and flags
 NVCC = /usr/local/cuda/bin/nvcc
 CXX = g++
-CXXFLAGS = -std=c++11 -I/usr/local/cuda/include -Iinclude
+COMMON = ./cuda-samples/Common
+UtilNPP = $(COMMON)/UtilNPP
+
+CXXFLAGS = -std=c++11 -I/usr/local/cuda/include -Iinclude -I$(UtilNPP) -I$(COMMON) -I./3rdParty
 LDFLAGS = -L/usr/local/cuda/lib64 -lcudart -lnppc -lnppial -lnppicc -lnppidei -lnppif -lnppig -lnppim -lnppist -lnppisu -lnppitc
 
 # Define directories
@@ -52,6 +55,7 @@ all: $(TARGET)
 
 # Rule for building the target executable
 $(TARGET): $(SRC)
+	echo LDFLAGS = $(LDFLAGS)
 	mkdir -p $(BIN_DIR)
 	$(NVCC) $(CXXFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)
 
