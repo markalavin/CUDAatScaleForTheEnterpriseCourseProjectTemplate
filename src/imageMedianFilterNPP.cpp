@@ -109,6 +109,19 @@ int main(int argc, char *argv[])
             sResultFilename = sResultFilename.substr(0, dot);
         sResultFilename += "_median_filter.png";
 
+        // Get the "radius" argument or default:
+        int radius = 3;   // default:  7x7 median filter
+        if (checkCmdLineFlag(argc, (const char **)argv, "radius"))
+        {
+            char *radius_str;
+            getCmdLineArgumentString(argc, (const char **)argv, "radius", &radius_str);
+            radius = atoi(radius_str);
+        }
+        if ( radius > 7 )
+            fprintf(stderr, "Warning: radius (%d) > 7 will produce bad result\n", radius);
+        else
+            fprintf(stderr, "radius is %d\n", radius);
+
         // 1. Load dimensions and pixel data using STB
         int width, height, channels;
         unsigned char *pData = stbi_load(sFilename.c_str(), &width, &height, &channels, 1);
@@ -130,7 +143,7 @@ int main(int argc, char *argv[])
         npp::ImageNPP_8u_C1 oDeviceDst(width, height);
 
         // 4. Median Filter Configuration
-        int nRadius = 2; // 5x5 filter
+        int nRadius = radius;
         NppiSize oMaskSize = {2 * nRadius + 1, 2 * nRadius + 1};
         NppiPoint oAnchor = {nRadius, nRadius};
 
