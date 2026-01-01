@@ -1,60 +1,48 @@
-/* Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of NVIDIA CORPORATION nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+/* * Standard Includes and NPP Utility Setup
  */
+#include <iostream>
+#include <fstream>
+#include <string>
+#include <string.h>
 
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-#define WINDOWS_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#pragma warning(disable : 4819)
+// 1. Define required NPP utility macros BEFORE including NPP headers
+#define NPP_CPP_INCLUDES
+#ifndef NPP_CHECK_NPP
+#define NPP_CHECK_NPP(token)                                   \
+    {                                                          \
+        NppStatus status = token;                              \
+        if (status != NPP_SUCCESS)                             \
+        {                                                      \
+            std::cerr << "NPP Error: " << status << std::endl; \
+            exit(EXIT_FAILURE);                                \
+        }                                                      \
+    }
+#endif
+#ifndef NPP_CHECK_CUDA
+#define NPP_CHECK_CUDA(token) (token)
+#endif
+#ifndef NPP_ASSERT_NOT_NULL
+#define NPP_ASSERT_NOT_NULL(token) (token)
 #endif
 
-#include <FreeImage.h>
-#include <ImagesCPU.h>
-
+// 2. Include local headers
 #include "Exceptions.h"
-#include <ImageIO.h>
-#include <ImagesCPU.h>
-#include <ImagesNPP.h>
+#include "ImagesCPU.h"
+#include "ImagesNPP.h"
 
-#include <string.h>
-#include <fstream>
-#include <iostream>
-
+// 3. Include CUDA/NPP system headers
 #include <cuda_runtime.h>
 #include <npp.h>
-
 #include <helper_cuda.h>
 #include <helper_string.h>
 
+// 4. Include STB for image loading
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
-
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
+
+using namespace npp;
 
 bool printfNPPinfo(int argc, char *argv[])
 {
@@ -81,6 +69,9 @@ int main(int argc, char *argv[])
 {
     printf("%s Starting...\n\n", argv[0]);
 
+    // Move pScratch to function scope so the final cleanup can see it
+    Npp8u *pScratch = nullptr;
+
     try
     {
         std::string sFilename;
@@ -102,58 +93,21 @@ int main(int argc, char *argv[])
             filePath = sdkFindFilePath("../data/Lena.png", argv[0]);
         }
 
-        if (filePath)
-        {
-            sFilename = filePath;
-        }
-        else
-        {
-            sFilename = "../data/Lena.png";
-        }
+        sFilename = (filePath) ? filePath : "../data/Lena.png";
 
-        // if we specify the filename at the command line, then we only test
-        // sFilename[0].
-        int file_errors = 0;
         std::ifstream infile(sFilename.data(), std::ifstream::in);
-
-        if (infile.good())
+        if (!infile.good())
         {
-            std::cout << "nppiRotate opened: <" << sFilename.data()
-                      << "> successfully!" << std::endl;
-            file_errors = 0;
-            infile.close();
-        }
-        else
-        {
-            std::cout << "nppiRotate unable to open: <" << sFilename.data() << ">"
-                      << std::endl;
-            file_errors++;
-            infile.close();
-        }
-
-        if (file_errors > 0)
-        {
+            std::cout << "Unable to open: <" << sFilename.data() << ">" << std::endl;
             exit(EXIT_FAILURE);
         }
+        infile.close();
 
         std::string sResultFilename = sFilename;
-
         std::string::size_type dot = sResultFilename.rfind('.');
-
         if (dot != std::string::npos)
-        {
             sResultFilename = sResultFilename.substr(0, dot);
-        }
-
         sResultFilename += "_median_filter.png";
-
-        if (checkCmdLineFlag(argc, (const char **)argv, "output"))
-        {
-            char *outputFilePath;
-            getCmdLineArgumentString(argc, (const char **)argv, "output",
-                                     &outputFilePath);
-            sResultFilename = outputFilePath;
-        }
 
         // 1. Load dimensions and pixel data using STB
         int width, height, channels;
@@ -165,100 +119,60 @@ int main(int argc, char *argv[])
             exit(EXIT_FAILURE);
         }
 
-        // 2. Setup NPP Host Image and metadata
-        // Initialize host image directly with dimensions
-        // 1. Create a clean NPP Host Image object (this allocates its own memory)
-        npp::ImageCPU_8u_C1 oHostSrc(width, height);
-
-        // 2. Perform a row-by-row copy to account for NPP memory alignment (pitch)
-        for (int y = 0; y < height; ++y)
-        {
-            unsigned char *pLineData = oHostSrc.data() + (y * oHostSrc.pitch());
-            unsigned char *pLineSrc = pData + (y * width);
-            memcpy(pLineData, pLineSrc, width);
-        }
-
-        // 3. Immediately free the STB buffer now that data is safely in oHostSrc
+        // 2. Create Device Image and Upload directly
+        npp::ImageNPP_8u_C1 oDeviceSrc(width, height);
+        cudaMemcpy2D(oDeviceSrc.data(), oDeviceSrc.pitch(), pData, width, width, height, cudaMemcpyHostToDevice);
         stbi_image_free(pData);
-        
-        NppiSize oSrcSize = {width, height};
-        NppiRect oSrcRect = {0, 0, width, height};
 
-        // 3. Upload to Device
-        npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
+        NppiSize oSizeROI = {width, height};
 
-       // create struct with the ROI size
-        NppiSize oSizeROI = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
+        // 3. Allocate device image for the result
+        npp::ImageNPP_8u_C1 oDeviceDst(width, height);
 
-        // Calculate the bounding box of the rotated image
-        NppiRect oBoundingBox;
-        double angle = 45.0; // Rotation angle in degrees
-        double aBoundingBox[2][2]; // Array to store the result coordinates
-        NPP_CHECK_NPP(nppiGetRotateBound(oSrcRect, aBoundingBox, angle, 0.0, 0.0));
-
-        oBoundingBox.x = (int)aBoundingBox[0][0];
-        oBoundingBox.y = (int)aBoundingBox[0][1];
-        oBoundingBox.width = (int)(aBoundingBox[1][0] - aBoundingBox[0][0]);
-        oBoundingBox.height = (int)(aBoundingBox[1][1] - aBoundingBox[0][1]);
-
-        // allocate device image for the rotated image
-        npp::ImageNPP_8u_C1 oDeviceDst(oBoundingBox.width, oBoundingBox.height);
-
-        // Set the rotation point (center of the image)
-        NppiPoint oRotationCenter = {(int)(oSrcSize.width / 2), (int)(oSrcSize.height / 2)};
-
-        // AAA.002: Median Filter Config and Scratch Buffer
-        int nRadius = 2;
+        // 4. Median Filter Configuration
+        int nRadius = 2; // 5x5 filter
         NppiSize oMaskSize = {2 * nRadius + 1, 2 * nRadius + 1};
         NppiPoint oAnchor = {nRadius, nRadius};
 
-        int nScratchSize;
+        // 5. Setup Scratch Buffer
+        Npp32u nScratchSize;
         NPP_CHECK_NPP(nppiFilterMedianGetBufferSize_8u_C1R(oSizeROI, oMaskSize, &nScratchSize));
+        cudaMalloc((void **)&pScratch, nScratchSize);
 
-        Npp8u *pScratch;
-        cudaMalloc((void **)&pScratch, nScratchSize); // Update the shifts to -oBoundingBox.x and -oBoundingBox.y
-
-        // AAA.003: The actual Median Filter call
+        // 6. Execute Median Filter
         NPP_CHECK_NPP(nppiFilterMedian_8u_C1R(
             oDeviceSrc.data(), oDeviceSrc.pitch(),
             oDeviceDst.data(), oDeviceDst.pitch(),
             oSizeROI, oMaskSize, oAnchor, pScratch));
 
-        // declare a host image for the result
-        npp::ImageCPU_8u_C1 oHostDst(oDeviceDst.size());
-        // and copy the device result data into it
-        oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
+        // 7. Download Result to Host
+        unsigned char *pHostDstData = new unsigned char[width * height];
+        cudaMemcpy2D(pHostDstData, width, oDeviceDst.data(), oDeviceDst.pitch(), width, height, cudaMemcpyDeviceToHost);
 
-        stbi_write_png(sResultFilename.c_str(), oHostDst.width(), oHostDst.height(), 1, oHostDst.data(), oHostDst.pitch());
+        // 8. Save the image using STB
+        stbi_write_png(sResultFilename.c_str(), width, height, 1, pHostDstData, width);
         std::cout << "Saved Median Filtered image: " << sResultFilename << std::endl;
 
-        // Clean up scratch buffer
-        cudaFree(pScratch);
-        std::cout << "Saved Median Filtered image: " << sResultFilename << std::endl;
-
-        // AAA.001: Free scratch buffer before exiting try block
-        if (pScratch != nullptr) cudaFree(pScratch);}
-    catch (npp::Exception &rException)
+        // Cleanup local host memory
+        delete[] pHostDstData;
+    }
+    catch (std::exception &e)
     {
-        std::cerr << "Program error! The following exception occurred: \n";
-        std::cerr << rException << std::endl;
-        std::cerr << "Aborting." << std::endl;
-
+        std::cerr << "Program error: " << e.what() << std::endl;
+        if (pScratch)
+            cudaFree(pScratch);
         exit(EXIT_FAILURE);
     }
     catch (...)
     {
-        std::cerr << "Program error! An unknown type of exception occurred. \n";
-        std::cerr << "Aborting." << std::endl;
-
+        std::cerr << "Unknown exception occurred." << std::endl;
+        if (pScratch)
+            cudaFree(pScratch);
         exit(EXIT_FAILURE);
-        return -1;
     }
 
     if (pScratch != nullptr)
-    {
         cudaFree(pScratch);
-    }
 
     return 0;
 }
