@@ -164,9 +164,16 @@ int main(int argc, char *argv[])
             oDeviceDst.data(), oDeviceDst.pitch(),
             oSizeROI, oMaskSize, oAnchor, pScratch));
 #endif /* ### */
+        // 5. Calculate dynamic decimation factor
+        float fFactor = (radius > 7) ? (float)radius / 7.0f : 1.0f;
 
-        // 5. Create half-size version workspace
-        NppiSize oSmallSize = {width / 2, height / 2};
+        NppiSize oSmallSize = {
+            (int)(width / fFactor),
+            (int)(height / fFactor)};
+        oSmallSize.width = std::max(oSmallSize.width, 1);
+        oSmallSize.height = std::max(oSmallSize.height, 1);
+
+        // Create the small version workspaces
         npp::ImageNPP_8u_C1 oDeviceSmallSrc(oSmallSize.width, oSmallSize.height);
         npp::ImageNPP_8u_C1 oDeviceSmallDst(oSmallSize.width, oSmallSize.height);
 
@@ -178,14 +185,13 @@ int main(int argc, char *argv[])
         NPP_CHECK_NPP(nppiResize_8u_C1R(
             oDeviceSrc.data(), oDeviceSrc.pitch(), oSrcSize, oSrcRect,
             oDeviceSmallSrc.data(), oDeviceSmallSrc.pitch(), oSmallSize, oSmallRect,
-            NPPI_INTER_SUPER)); // Best quality for shrinking
+            NPPI_INTER_SUPER));
 
         // 6.2 Filter the small image
-        int nSmallRadius = nRadius / 2;
+        int nSmallRadius = (radius > 7) ? 7 : radius;
         NppiSize oSmallMask = {2 * nSmallRadius + 1, 2 * nSmallRadius + 1};
         NppiPoint oSmallAnchor = {nSmallRadius, nSmallRadius};
 
-        // Change from Npp32s to Npp32u
         Npp32u nSmallBufferSize;
         NPP_CHECK_NPP(nppiFilterMedianGetBufferSize_8u_C1R(oSmallSize, oSmallMask, &nSmallBufferSize));
 
@@ -199,18 +205,16 @@ int main(int argc, char *argv[])
 
         cudaFree(pSmallScratch);
 
-        // C1. Copy source to destination so borders remain as original pixels
+        // C1. Copy source to destination for background
         cudaMemcpy2D(oDeviceDst.data(), oDeviceDst.pitch(),
                      oDeviceSrc.data(), oDeviceSrc.pitch(),
                      width, height, cudaMemcpyDeviceToDevice);
 
         // 6.5 Resize Small Filtered Image back to Original Size
-        // This will "paint" the filtered results over the destination
         NPP_CHECK_NPP(nppiResize_8u_C1R(
             oDeviceSmallDst.data(), oDeviceSmallDst.pitch(), oSmallSize, oSmallRect,
             oDeviceDst.data(), oDeviceDst.pitch(), oSrcSize, oSrcRect,
             NPPI_INTER_LANCZOS));
-            
         // 7. Download Result to Host
         unsigned char *pHostDstData = new unsigned char[width * height];
         cudaMemcpy2D(pHostDstData, width, oDeviceDst.data(), oDeviceDst.pitch(), width, height, cudaMemcpyDeviceToHost);
