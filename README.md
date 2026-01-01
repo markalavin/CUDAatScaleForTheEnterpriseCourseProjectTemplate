@@ -2,9 +2,11 @@
 
 ## Overview
 
-This project demonstrates the use of NVIDIA Performance Primitives (NPP) library with CUDA to perform image rotation. The goal is to utilize GPU acceleration to efficiently rotate a given image by a specified angle, leveraging the computational power of modern GPUs. The project is a part of the CUDA at Scale for the Enterprise course and serves as a template for understanding how to implement basic image processing operations using CUDA and NPP.
+This project demonstrates the use of NVIDIA Performance Primitives (NPP) library with CUDA to perform image median filtering. The goal is to utilize GPU acceleration to efficiently rotate a given image by a specified angle, leveraging the computational power of modern GPUs. The project is a part of the CUDA at Scale for the Enterprise course and serves as an example for understanding how to implement basic image processing operations using CUDA and NPP.
 
 ## Code Organization
+
+This code is maintained in GitHub in the project https://github.com/markalavin/CUDAatScaleForTheEnterpriseCourseProjectTemplate/tree/main; for development, it was downloaded into a Coursera-provided userid with Visual Studio on Linux.  It should be buildable and runnable on a Windows system as well, although the Makefile may have to be adjusted.
 
 ```bin/```
 This folder should hold all binary/executable code that is built automatically or manually. Executable code should have use the .exe extension or programming language-specific extension.
@@ -21,14 +23,15 @@ The source code should be placed here in a hierarchical fashion, as appropriate.
 ```README.md```
 This file should hold the description of the project so that anyone cloning or deciding if they want to clone this repository can understand its purpose to help with their decision.
 
-```INSTALL```
-This file should hold the human-readable set of instructions for installing the code so that it can be executed. If possible it should be organized around different operating systems, so that it can be done by as many people as possible with different constraints.
+```Makefile```
+For building your project's code in an automatic fashion.
 
-```Makefile or CMAkeLists.txt or build.sh```
-There should be some rudimentary scripts for building your project's code in an automatic fashion.
+```3rdParty```
+Code from STB for reading and writing image files.
 
-```run.sh```
-An optional script used to run your executable code, either with or without command-line arguments.
+```Common```
+Code for NPP to perform CUDA-assisted image processing.
+
 
 ## Key Concepts
 
@@ -93,31 +96,23 @@ The samples makefiles can take advantage of certain options:
     $ make HOST_COMPILER=g++
 ```
 
+## What the Program Does
+The program performs median filtering on an RGB image like "Lena.png", from which a grayscale intensity image is derived.  Median filtering
+calculates the value of every output pixel based on the median of the values of a square "mask" surrounding the pixel.  Median filtering is a technique for reducing noise and detail in an image; unlike linear filtering (e.g., Gaussian convolution), median filtering does not "blur out" edges.
+
+### Downsampling to handle large-radius median filtering
+
+As the program was developed, I added an argument ```-radius``` to specify the radius of the filter mask.  However, I discovered that the NPP median filtering function does not behave correctly if the radius is > 7.  With the help of Google Gemini, I developed a technique
+for getting around this.  Suppose the specified radius is 14.  In that case, we can downsample the input by a factor of 2x, then run
+the NPP median filtering with a radius of 7, then upsample the output by a factor of 2x.  In general, the downsample/upsample by a factor of ```radius / 7``` allows the handling of virtually any radius.
 
 ## Running the Program
-After building the project, you can run the program using the following command:
+After building the project, you can run the program using the following commands:
 
-```bash
-Copy code
-make run
+```
+cd CUDAatScaleForTheEnterpriseProjectTemplate   # root directory of this median filter project
+./bin/imageMedianFilterNPP [ -input filename ] [ -output filename ] [ -radius number ]
 ```
 
-This command will execute the compiled binary, rotating the input image (Lena.png) by 45 degrees, and save the result as Lena_rotated.png in the data/ directory.
+This command will execute the compiled binary, rotating the input image (Lena.png) by 45 degrees, and save the result image in the ```data/<inputfilename>_median_filter``` file.
 
-If you wish to run the binary directly with custom input/output files, you can use:
-
-```bash
-- Copy code
-./bin/imageRotationNPP --input data/Lena.png --output data/Lena_rotated.png
-```
-
-- Cleaning Up
-To clean up the compiled binaries and other generated files, run:
-
-
-```bash
-- Copy code
-make clean
-```
-
-This will remove all files in the bin/ directory.
