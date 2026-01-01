@@ -118,7 +118,7 @@ int main(int argc, char *argv[])
             radius = atoi(radius_str);
         }
         if ( radius > 7 )
-            fprintf(stderr, "Warning: radius (%d) > 7 will produce bad result\n", radius);
+            fprintf(stderr, "Large radius (%d) detected: Using dynamic downsampling pipeline.\n", radius);
         else
             fprintf(stderr, "radius is %d\n", radius);
 

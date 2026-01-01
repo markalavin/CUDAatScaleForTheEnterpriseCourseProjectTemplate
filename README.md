@@ -18,7 +18,7 @@ This folder should hold all example data in any format. If the original data is 
 Any libraries that are not installed via the Operating System-specific package manager should be placed here, so that it is easier for inclusion/linking.
 
 ```src/```
-The source code should be placed here in a hierarchical fashion, as appropriate.
+The source code (.cpp and .h) for the project should be placed here.
 
 ```README.md```
 This file should hold the description of the project so that anyone cloning or deciding if they want to clone this repository can understand its purpose to help with their decision.
@@ -114,5 +114,5 @@ cd CUDAatScaleForTheEnterpriseProjectTemplate   # root directory of this median 
 ./bin/imageMedianFilterNPP [ -input filename ] [ -output filename ] [ -radius number ]
 ```
 
-This command will execute the compiled binary, rotating the input image (Lena.png) by 45 degrees, and save the result image in the ```data/<inputfilename>_median_filter``` file.
+This command will execute the compiled binary, filtering the input image (e.g., ```data/Lena.png```), and save the result image in the ```data/<inputfilename>_median_filter``` file.
 
