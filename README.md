@@ -1,4 +1,4 @@
-# Image Rotation using NVIDIA NPP with CUDA
+# Image Median Filtering using NVIDIA NPP with CUDA
 
 ## Overview
 
