@@ -4,7 +4,7 @@ CXX = g++
 COMMON = ./NPP/Common
 UtilNPP = $(COMMON)/UtilNPP
 
-CXXFLAGS = -std=c++11 -I/usr/local/cuda/include -Iinclude -I$(UtilNPP) -I$(COMMON) -I./3rdParty
+CXXFLAGS = -std=c++11 -I/usr/local/cuda/include -Iinclude -I$(UtilNPP) -I$(COMMON) -I./3rdParty  -I./Common -DNPP_ASSERT=assert -include cassert
 LDFLAGS = -L/usr/local/cuda/lib64 -lcudart -lnppc -lnppial -lnppicc -lnppidei -lnppif -lnppig -lnppim -lnppist -lnppisu -lnppitc
 
 # Define directories

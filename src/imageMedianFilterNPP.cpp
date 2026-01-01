@@ -32,7 +32,10 @@
 #pragma warning(disable : 4819)
 #endif
 
-#include <Exceptions.h>
+#include <FreeImage.h>
+#include <ImagesCPU.h>
+
+#include "Exceptions.h"
 #include <ImageIO.h>
 #include <ImagesCPU.h>
 #include <ImagesNPP.h>
