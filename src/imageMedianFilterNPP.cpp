@@ -33,7 +33,7 @@
 #endif
 
 #include <Exceptions.h>
-// #include <ImageIO.h>
+#include <ImageIO.h>
 #include <ImagesCPU.h>
 #include <ImagesNPP.h>
 
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
             sResultFilename = sResultFilename.substr(0, dot);
         }
 
-        sResultFilename += "_rotate.png";
+        sResultFilename += "_median_filter.png";
 
         if (checkCmdLineFlag(argc, (const char **)argv, "output"))
         {
@@ -204,25 +204,37 @@ int main(int argc, char *argv[])
         // Set the rotation point (center of the image)
         NppiPoint oRotationCenter = {(int)(oSrcSize.width / 2), (int)(oSrcSize.height / 2)};
 
-        // Ensure the destination ROI is anchored at 0,0 for the rotation call
-        NppiRect oDstRect = {0, 0, oBoundingBox.width, oBoundingBox.height};
+        // AAA.002: Median Filter Config and Scratch Buffer
+        int nRadius = 2;
+        NppiSize oMaskSize = {2 * nRadius + 1, 2 * nRadius + 1};
+        NppiPoint oAnchor = {nRadius, nRadius};
 
-        // Update the shifts to -oBoundingBox.x and -oBoundingBox.y
-        NPP_CHECK_NPP(nppiRotate_8u_C1R(
-            oDeviceSrc.data(), oSrcSize, oDeviceSrc.pitch(), oSrcRect,
-            oDeviceDst.data(), oDeviceDst.pitch(), oDstRect,
-            angle, -(double)oBoundingBox.x, -(double)oBoundingBox.y, NPPI_INTER_NN));
+        int nScratchSize;
+        NPP_CHECK_NPP(nppiFilterMedianGetBufferSize_8u_C1R(oSizeROI, oMaskSize, &nScratchSize));
+
+        Npp8u *pScratch;
+        cudaMalloc((void **)&pScratch, nScratchSize); // Update the shifts to -oBoundingBox.x and -oBoundingBox.y
+
+        // AAA.003: The actual Median Filter call
+        NPP_CHECK_NPP(nppiFilterMedian_8u_C1R(
+            oDeviceSrc.data(), oDeviceSrc.pitch(),
+            oDeviceDst.data(), oDeviceDst.pitch(),
+            oSizeROI, oMaskSize, oAnchor, pScratch));
 
         // declare a host image for the result
         npp::ImageCPU_8u_C1 oHostDst(oDeviceDst.size());
         // and copy the device result data into it
         oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
 
-        stbi_write_png(sResultFilename.c_str(), oHostDst.width(), oHostDst.height(), 1, oHostDst.data(), oHostDst.width());
-        std::cout << "Saved image: " << sResultFilename << std::endl;
+        stbi_write_png(sResultFilename.c_str(), oHostDst.width(), oHostDst.height(), 1, oHostDst.data(), oHostDst.pitch());
+        std::cout << "Saved Median Filtered image: " << sResultFilename << std::endl;
 
-        exit(EXIT_SUCCESS);
-    }
+        // Clean up scratch buffer
+        cudaFree(pScratch);
+        std::cout << "Saved Median Filtered image: " << sResultFilename << std::endl;
+
+        // AAA.001: Free scratch buffer before exiting try block
+        if (pScratch != nullptr) cudaFree(pScratch);}
     catch (npp::Exception &rException)
     {
         std::cerr << "Program error! The following exception occurred: \n";
@@ -238,6 +250,11 @@ int main(int argc, char *argv[])
 
         exit(EXIT_FAILURE);
         return -1;
+    }
+
+    if (pScratch != nullptr)
+    {
+        cudaFree(pScratch);
     }
 
     return 0;
